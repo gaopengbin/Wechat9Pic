@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      'onnxruntime-web': 'onnxruntime-web',
     },
   },
   build: {
@@ -23,6 +24,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'three', '@tensorflow/tfjs'],
+    exclude: ['onnxruntime-web', '@imgly/background-removal'],
   },
   test: {
     globals: true,

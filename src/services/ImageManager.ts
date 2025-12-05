@@ -14,7 +14,7 @@ import {
   isValidFileSize,
   isValidPosition,
 } from '@/utils/validation';
-import { generateId, fileToBase64, getImageDimensions } from '@/utils/helpers';
+import { generateId, fileToBase64, getImageDimensions, processFileForUpload } from '@/utils/helpers';
 import { compressImage, createThumbnail } from '@/utils/imageProcessing';
 
 export class ImageManager {
@@ -58,17 +58,20 @@ export class ImageManager {
         };
       }
 
+      // 处理 HEIC 格式转换
+      const convertedFile = await processFileForUpload(file);
+
       // 获取图片尺寸
-      const dimensions = await getImageDimensions(file);
+      const dimensions = await getImageDimensions(convertedFile);
 
       // 压缩图片（如果需要）
-      let processedFile = file;
+      let processedFile = convertedFile;
       if (
         dimensions.width > MAX_IMAGE_DIMENSION ||
         dimensions.height > MAX_IMAGE_DIMENSION
       ) {
-        const compressedBlob = await this.compressImage(file, MAX_IMAGE_DIMENSION);
-        processedFile = new File([compressedBlob], file.name, { type: file.type });
+        const compressedBlob = await this.compressImage(convertedFile, MAX_IMAGE_DIMENSION);
+        processedFile = new File([compressedBlob], convertedFile.name, { type: convertedFile.type });
       }
 
       // 生成缩略图

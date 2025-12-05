@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { ProcessedImage, ExportFormat } from '@/types';
 import { exportService } from '@/services/ExportService';
 import { formatFileSize } from '@/utils/helpers';
+import { useToast } from './Toast';
 
 interface ExportDialogProps {
   images: ProcessedImage[];
@@ -18,6 +19,7 @@ export default function ExportDialog({ images, onClose }: ExportDialogProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [exportType, setExportType] = useState<'all' | 'single'>('all');
+  const { showToast } = useToast();
 
   const estimatedSize = exportService.estimateFileSize(images);
 
@@ -36,7 +38,7 @@ export default function ExportDialog({ images, onClose }: ExportDialogProps) {
       }, 500);
     } catch (error) {
       console.error('Export failed:', error);
-      alert('导出失败，请重试');
+      showToast('导出失败，请重试', 'error');
     } finally {
       setIsExporting(false);
     }
@@ -47,10 +49,10 @@ export default function ExportDialog({ images, onClose }: ExportDialogProps) {
 
     try {
       await exportService.downloadSingle(image, format);
-      alert('导出成功！');
+      showToast('导出成功！', 'success');
     } catch (error) {
       console.error('Export failed:', error);
-      alert('导出失败，请重试');
+      showToast('导出失败，请重试', 'error');
     } finally {
       setIsExporting(false);
     }

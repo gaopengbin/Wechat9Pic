@@ -11,10 +11,16 @@ import {
 import type { ContentType, PoseType } from '@/types';
 
 /**
- * Validate if a file is a valid image
+ * Validate if a file is a valid image (including HEIC by extension)
  */
 export function isValidImageFile(file: File): boolean {
-  return SUPPORTED_IMAGE_FORMATS.includes(file.type);
+  // Check MIME type
+  if (SUPPORTED_IMAGE_FORMATS.includes(file.type)) {
+    return true;
+  }
+  // Some browsers don't recognize HEIC MIME type, check extension
+  const ext = file.name.toLowerCase();
+  return ext.endsWith('.heic') || ext.endsWith('.heif');
 }
 
 /**
@@ -90,7 +96,7 @@ export function isValidDimensions(width: number, height: number): boolean {
  * Validate file extension
  */
 export function hasValidExtension(filename: string): boolean {
-  const ext = filename.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/);
+  const ext = filename.toLowerCase().match(/\.(jpg|jpeg|png|webp|heic|heif)$/);
   return ext !== null;
 }
 

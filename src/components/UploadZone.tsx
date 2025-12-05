@@ -98,7 +98,7 @@ export default function UploadZone({ position, onFileSelect, onMultipleFilesSele
       <input
         ref={fileInputRef}
         type="file"
-        accept={SUPPORTED_IMAGE_FORMATS.join(',')}
+        accept={[...SUPPORTED_IMAGE_FORMATS, '.heic', '.heif'].join(',')}
         onChange={handleFileChange}
         multiple
         className="hidden"

@@ -3,7 +3,9 @@
  * Validates: Requirements 2.1, 2.5
  */
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
+import { useToast } from './Toast';
+import { isHeicFile, processFileForUpload } from '@/utils/helpers';
 
 interface SubjectUploaderProps {
   onUpload: (imageData: string) => void;
@@ -19,6 +21,7 @@ export const SubjectUploader: React.FC<SubjectUploaderProps> = ({
   disabled = false,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { showToast } = useToast();
 
   const handleClick = useCallback(() => {
     if (!disabled && !isProcessing) {
@@ -26,61 +29,80 @@ export const SubjectUploader: React.FC<SubjectUploaderProps> = ({
     }
   }, [disabled, isProcessing]);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isConverting, setIsConverting] = useState(false);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 验证文件类型
-    if (!file.type.startsWith('image/')) {
-      alert('请选择图片文件');
+    // 验证文件类型（包括 HEIC）
+    const isImage = file.type.startsWith('image/') || isHeicFile(file);
+    if (!isImage) {
+      showToast('请选择图片文件', 'error');
       return;
     }
 
     // 验证文件大小 (最大10MB)
     if (file.size > 10 * 1024 * 1024) {
-      alert('图片大小不能超过10MB');
+      showToast('图片大小不能超过10MB', 'error');
       return;
     }
 
-    // 读取文件
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const imageData = event.target?.result as string;
-      if (imageData) {
-        onUpload(imageData);
+    try {
+      // 如果是 HEIC 格式，显示转换提示
+      if (isHeicFile(file)) {
+        setIsConverting(true);
       }
-    };
-    reader.onerror = () => {
-      alert('读取文件失败');
-    };
-    reader.readAsDataURL(file);
+
+      // 处理文件（HEIC 转 JPEG）
+      const processedFile = await processFileForUpload(file);
+
+      // 读取文件
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const imageData = event.target?.result as string;
+        if (imageData) {
+          onUpload(imageData);
+        }
+        setIsConverting(false);
+      };
+      reader.onerror = () => {
+        showToast('读取文件失败', 'error');
+        setIsConverting(false);
+      };
+      reader.readAsDataURL(processedFile);
+    } catch (error) {
+      console.error('File processing error:', error);
+      showToast('HEIC 格式转换失败', 'error');
+      setIsConverting(false);
+    }
 
     // 清空input以允许重复选择同一文件
     e.target.value = '';
-  }, [onUpload]);
+  }, [onUpload, showToast]);
 
   return (
     <div className="space-y-3">
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         onChange={handleFileChange}
         className="hidden"
       />
 
       <button
         onClick={handleClick}
-        disabled={disabled || isProcessing}
+        disabled={disabled || isProcessing || isConverting}
         className={`
           w-full py-2.5 px-4 rounded-xl text-sm font-medium transition-all duration-300
-          ${disabled || isProcessing
+          ${disabled || isProcessing || isConverting
             ? 'bg-white/5 text-gray-500 cursor-not-allowed border border-white/5'
             : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:shadow-lg hover:shadow-purple-500/30 hover:-translate-y-0.5'
           }
         `}
       >
-        {isProcessing ? '处理中...' : '+ 添加主体'}
+        {isConverting ? '转换 HEIC...' : isProcessing ? '处理中...' : '+ 添加主体'}
       </button>
 
       {/* 进度条 */}

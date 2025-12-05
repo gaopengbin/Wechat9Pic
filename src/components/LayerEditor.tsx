@@ -21,6 +21,14 @@ interface LayerEditorProps {
   originalImages: ImageData[]; // 原始9张图片
   onExport: (blob: Blob) => void;
   onClose: () => void;
+  onConfirm?: (slicedImages: string[]) => void; // 确认并返回切片图片
+}
+
+// 操作历史记录类型
+interface HistoryState {
+  layers: Layer[];
+  gridImages: string[];
+  backgroundImage: string;
 }
 
 export const LayerEditor: React.FC<LayerEditorProps> = ({
@@ -28,6 +36,7 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
   originalImages,
   onExport,
   onClose,
+  onConfirm,
 }) => {
   const [layerManager] = useState(() => new LayerManager());
   const [mattingService] = useState(() => new MattingService());
@@ -56,6 +65,12 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
   const [showGridPreview, setShowGridPreview] = useState(false);
   const [gridPreviewImages, setGridPreviewImages] = useState<string[]>([]);
 
+  // 操作历史记录
+  const [history, setHistory] = useState<HistoryState[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const isUndoingRef = useRef(false);
+  const saveHistoryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // 获取选中的图层
   const selectedLayer = layers.find(l => l.id === selectedLayerId) || null;
 
@@ -64,6 +79,115 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
     const images = originalImages.map(img => img.fullSize);
     setGridImages(images);
   }, [originalImages]);
+
+  // 保存历史状态
+  const saveHistory = useCallback(() => {
+    if (isUndoingRef.current) return;
+    
+    const currentState: HistoryState = {
+      layers: JSON.parse(JSON.stringify(layers)),
+      gridImages: [...gridImages],
+      backgroundImage: currentBackgroundImage,
+    };
+    
+    setHistory(prev => {
+      // 如果当前不是最新状态，截断后面的历史
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push(currentState);
+      // 最多保存30步历史
+      if (newHistory.length > 30) newHistory.shift();
+      return newHistory;
+    });
+    setHistoryIndex(prev => Math.min(prev + 1, 29));
+  }, [layers, gridImages, currentBackgroundImage, historyIndex]);
+
+  // 撤销操作
+  const handleUndo = useCallback(() => {
+    if (historyIndex <= 0) return;
+    
+    isUndoingRef.current = true;
+    const prevState = history[historyIndex - 1];
+    
+    // 恢复图层状态
+    layerManager.clearLayers();
+    prevState.layers.forEach(layer => {
+      const newLayer = layerManager.addLayer(layer.imageData, layer.type);
+      if (newLayer) {
+        layerManager.updateLayer(newLayer.id, {
+          transform: layer.transform,
+          shadow: layer.shadow,
+          opacity: layer.opacity,
+          visible: layer.visible,
+        });
+      }
+    });
+    
+    setLayers(layerManager.getLayers());
+    setGridImages(prevState.gridImages);
+    setCurrentBackgroundImage(prevState.backgroundImage);
+    setHistoryIndex(prev => prev - 1);
+    
+    setTimeout(() => {
+      isUndoingRef.current = false;
+    }, 100);
+  }, [history, historyIndex, layerManager]);
+
+  // 重做操作
+  const handleRedo = useCallback(() => {
+    if (historyIndex >= history.length - 1) return;
+    
+    isUndoingRef.current = true;
+    const nextState = history[historyIndex + 1];
+    
+    // 恢复图层状态
+    layerManager.clearLayers();
+    nextState.layers.forEach(layer => {
+      const newLayer = layerManager.addLayer(layer.imageData, layer.type);
+      if (newLayer) {
+        layerManager.updateLayer(newLayer.id, {
+          transform: layer.transform,
+          shadow: layer.shadow,
+          opacity: layer.opacity,
+          visible: layer.visible,
+        });
+      }
+    });
+    
+    setLayers(layerManager.getLayers());
+    setGridImages(nextState.gridImages);
+    setCurrentBackgroundImage(nextState.backgroundImage);
+    setHistoryIndex(prev => prev + 1);
+    
+    setTimeout(() => {
+      isUndoingRef.current = false;
+    }, 100);
+  }, [history, historyIndex, layerManager]);
+
+  // 防抖保存历史（用于滑块等频繁变化的操作）
+  const debouncedSaveHistory = useCallback(() => {
+    if (saveHistoryTimeoutRef.current) {
+      clearTimeout(saveHistoryTimeoutRef.current);
+    }
+    saveHistoryTimeoutRef.current = setTimeout(() => {
+      saveHistory();
+    }, 500);
+  }, [saveHistory]);
+
+  // 键盘快捷键支持
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   // 初始化背景图层
   useEffect(() => {
@@ -118,13 +242,16 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
       setLayers(layerManager.getLayers());
       setSelectedLayerId(newLayer.id);
       setProcessingProgress(100);
+      
+      // 保存历史
+      setTimeout(() => saveHistory(), 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : '处理失败');
     } finally {
       setIsProcessing(false);
       setProcessingProgress(0);
     }
-  }, [mattingService, layerManager]);
+  }, [mattingService, layerManager, saveHistory]);
 
   // 选择图层
   const handleSelectLayer = useCallback((layerId: string) => {
@@ -145,13 +272,17 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
     if (selectedLayerId === layerId) {
       setSelectedLayerId(null);
     }
-  }, [layers, layerManager, selectedLayerId]);
+    
+    // 保存历史
+    saveHistory();
+  }, [layers, layerManager, selectedLayerId, saveHistory]);
 
   // 重新排序图层
   const handleReorderLayers = useCallback((fromIndex: number, toIndex: number) => {
     layerManager.reorderLayers(fromIndex, toIndex);
     setLayers(layerManager.getLayers());
-  }, [layerManager]);
+    saveHistory();
+  }, [layerManager, saveHistory]);
 
   // 切换图层可见性
   const handleToggleVisibility = useCallback((layerId: string) => {
@@ -159,29 +290,33 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
     if (layer) {
       layerManager.updateLayer(layerId, { visible: !layer.visible });
       setLayers(layerManager.getLayers());
+      saveHistory();
     }
-  }, [layers, layerManager]);
+  }, [layers, layerManager, saveHistory]);
 
   // 更新变换参数
   const handleTransformChange = useCallback((transform: Partial<LayerTransformConfig>) => {
     if (!selectedLayerId) return;
     layerManager.updateLayer(selectedLayerId, { transform: { ...selectedLayer!.transform, ...transform } });
     setLayers(layerManager.getLayers());
-  }, [selectedLayerId, selectedLayer, layerManager]);
+    debouncedSaveHistory();
+  }, [selectedLayerId, selectedLayer, layerManager, debouncedSaveHistory]);
 
   // 更新阴影参数
   const handleShadowChange = useCallback((shadow: Partial<LayerShadowConfig>) => {
     if (!selectedLayerId) return;
     layerManager.updateLayer(selectedLayerId, { shadow: { ...selectedLayer!.shadow, ...shadow } });
     setLayers(layerManager.getLayers());
-  }, [selectedLayerId, selectedLayer, layerManager]);
+    debouncedSaveHistory();
+  }, [selectedLayerId, selectedLayer, layerManager, debouncedSaveHistory]);
 
   // 更新透明度
   const handleOpacityChange = useCallback((opacity: number) => {
     if (!selectedLayerId) return;
     layerManager.updateLayer(selectedLayerId, { opacity });
     setLayers(layerManager.getLayers());
-  }, [selectedLayerId, layerManager]);
+    debouncedSaveHistory();
+  }, [selectedLayerId, layerManager, debouncedSaveHistory]);
 
   // 编辑单张图片
   const handleEditImage = useCallback((index: number) => {
@@ -215,6 +350,9 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
           layerManager.updateLayer(bgLayer.id, { imageData: result.imageData });
           setLayers(layerManager.getLayers());
         }
+        
+        // 保存历史
+        saveHistory();
       }
     } catch (err) {
       setError('更新背景失败');
@@ -222,7 +360,7 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
       setIsProcessing(false);
       setEditingImageIndex(null);
     }
-  }, [editingImageIndex, gridImages, gridGenerator, layers, layerManager]);
+  }, [editingImageIndex, gridImages, gridGenerator, layers, layerManager, saveHistory]);
 
   // 关闭图片编辑器
   const handleCloseImageEditor = useCallback(() => {
@@ -325,9 +463,13 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
   }, [isDragging, selectedLayerId, selectedLayer, layerManager]);
 
   const handlePreviewMouseUp = useCallback(() => {
+    if (isDragging) {
+      // 拖拽结束时保存历史
+      saveHistory();
+    }
     setIsDragging(false);
     dragStartRef.current = null;
-  }, []);
+  }, [isDragging, saveHistory]);
 
   // 全局鼠标事件处理（防止拖拽时鼠标移出预览区）
   useEffect(() => {
@@ -358,6 +500,10 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
     };
 
     const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        // 拖拽结束时保存历史
+        saveHistory();
+      }
       setIsDragging(false);
       dragStartRef.current = null;
     };
@@ -369,7 +515,7 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isDragging, selectedLayerId, selectedLayer, layerManager]);
+  }, [isDragging, selectedLayerId, selectedLayer, layerManager, saveHistory]);
 
   // 导出
   const handleExport = useCallback(async () => {
@@ -384,22 +530,100 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
     }
   }, [layers, exportService, onExport]);
 
+  // 确认并返回主界面
+  const handleConfirm = useCallback(async () => {
+    if (!onConfirm || !previewUrl) return;
+    
+    setIsProcessing(true);
+    try {
+      // 生成九宫格切片
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = previewUrl;
+      });
+
+      const size = img.width;
+      const cellSize = Math.floor(size / 3);
+      const slicedImages: string[] = [];
+
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 3; col++) {
+          const canvas = document.createElement('canvas');
+          canvas.width = cellSize;
+          canvas.height = cellSize;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) continue;
+
+          ctx.drawImage(
+            img,
+            col * cellSize,
+            row * cellSize,
+            cellSize,
+            cellSize,
+            0,
+            0,
+            cellSize,
+            cellSize
+          );
+
+          slicedImages.push(canvas.toDataURL('image/jpeg', 0.95));
+        }
+      }
+
+      onConfirm(slicedImages);
+    } catch (err) {
+      setError('生成切片失败');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [onConfirm, previewUrl]);
+
   return (
     <div className="flex flex-col h-full bg-slate-900 text-white">
       {/* 顶部工具栏 */}
       <div className="flex items-center justify-between px-6 py-4 glass z-10 mx-4 mt-4 rounded-2xl">
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-gray-300 hover:text-white transition-colors flex items-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          返回
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-300 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            取消
+          </button>
+          
+          {/* 撤销/重做按钮 */}
+          <div className="flex items-center gap-1 ml-4 border-l border-white/10 pl-4">
+            <button
+              onClick={handleUndo}
+              disabled={historyIndex <= 0}
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              title="撤销 (Ctrl+Z)"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+              </svg>
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={historyIndex >= history.length - 1}
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              title="重做 (Ctrl+Y)"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        
         <h2 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-400">
           3D图层编辑
         </h2>
+        
         <div className="flex items-center gap-2">
           <button
             onClick={generateGridPreview}
@@ -414,10 +638,25 @@ export const LayerEditor: React.FC<LayerEditorProps> = ({
           <button
             onClick={handleExport}
             disabled={isProcessing}
-            className="px-6 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 border border-blue-500/50 text-blue-300 rounded-xl hover:bg-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
             导出
           </button>
+          {onConfirm && (
+            <button
+              onClick={handleConfirm}
+              disabled={isProcessing || !previewUrl}
+              className="px-6 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:shadow-lg hover:shadow-green-500/30 transition-all transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              确认
+            </button>
+          )}
         </div>
       </div>
 

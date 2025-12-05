@@ -9,6 +9,8 @@ import type { ImageData } from '@/types';
 import UploadZone from './UploadZone';
 import ImageThumbnail from './ImageThumbnail';
 import ImageEditor from './ImageEditor';
+import ImageAnalysisPanel from './ImageAnalysisPanel';
+import { useToast } from './Toast';
 
 interface GridEditorProps {
   imageManager: ImageManager;
@@ -26,6 +28,8 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
   });
   const [draggedPosition, setDraggedPosition] = useState<number | null>(null);
   const [editingImage, setEditingImage] = useState<ImageData | null>(null);
+  const [analyzingImage, setAnalyzingImage] = useState<ImageData | null>(null);
+  const { showToast, showConfirm } = useToast();
 
   // 更新图片状态
   const updateImages = useCallback(() => {
@@ -48,10 +52,10 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
       if (result.success) {
         updateImages();
       } else {
-        alert(result.error || '上传失败');
+        showToast(result.error || '上传失败', 'error');
       }
     },
-    [imageManager, updateImages]
+    [imageManager, updateImages, showToast]
   );
 
   // 处理批量文件上传
@@ -72,7 +76,7 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
       const filesToUpload = files.slice(0, Math.min(files.length, emptyPositions.length));
 
       if (filesToUpload.length < files.length) {
-        alert(`只能上传 ${filesToUpload.length} 张图片（剩余空位不足）`);
+        showToast(`只能上传 ${filesToUpload.length} 张图片（剩余空位不足）`, 'warning');
       }
 
       // 批量上传
@@ -91,23 +95,29 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
 
       // 显示结果
       if (failCount > 0) {
-        alert(`上传完成：成功 ${successCount} 张，失败 ${failCount} 张`);
+        showToast(`上传完成：成功 ${successCount} 张，失败 ${failCount} 张`, 'warning');
       } else if (successCount > 0) {
         // 成功时不显示提示，保持流畅体验
       }
     },
-    [imageManager, updateImages]
+    [imageManager, updateImages, showToast]
   );
 
   // 处理图片删除
   const handleDelete = useCallback(
-    (position: number) => {
-      if (window.confirm('确定要删除这张图片吗？')) {
+    async (position: number) => {
+      const confirmed = await showConfirm({
+        title: '删除图片',
+        message: '确定要删除这张图片吗？',
+        confirmText: '删除',
+        cancelText: '取消',
+      });
+      if (confirmed) {
         imageManager.removeImage(position);
         updateImages();
       }
     },
-    [imageManager, updateImages]
+    [imageManager, updateImages, showConfirm]
   );
 
   // 处理拖拽开始
@@ -149,6 +159,36 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
     }
   }, [images]);
 
+  // 处理图片分析
+  const handleAnalyze = useCallback((position: number) => {
+    const image = images.get(position);
+    if (image) {
+      setAnalyzingImage(image);
+    }
+  }, [images]);
+
+  // 处理分析后的裁剪应用
+  const handleApplyAnalysisCrop = useCallback(async (croppedImage: string) => {
+    if (!analyzingImage) return;
+
+    try {
+      const response = await fetch(croppedImage);
+      const blob = await response.blob();
+      const file = new File([blob], `cropped-${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+      const result = await imageManager.uploadImage(file, analyzingImage.position);
+      if (result.success) {
+        updateImages();
+        setAnalyzingImage(null);
+      } else {
+        showToast(result.error || '应用裁剪失败', 'error');
+      }
+    } catch (error) {
+      console.error('Apply crop error:', error);
+      showToast('应用裁剪失败', 'error');
+    }
+  }, [analyzingImage, imageManager, updateImages, showToast]);
+
   // 处理保存编辑后的图片
   const handleSaveEdit = useCallback(async (croppedImage: string) => {
     if (!editingImage) return;
@@ -165,13 +205,13 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
         updateImages();
         setEditingImage(null);
       } else {
-        alert(result.error || '保存失败');
+        showToast(result.error || '保存失败', 'error');
       }
     } catch (error) {
       console.error('Save edit error:', error);
-      alert('保存失败，请重试');
+      showToast('保存失败，请重试', 'error');
     }
-  }, [editingImage, imageManager, updateImages]);
+  }, [editingImage, imageManager, updateImages, showToast]);
 
   // 渲染3x3网格
   const renderGrid = () => {
@@ -191,6 +231,7 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
               image={image}
               onDelete={() => handleDelete(i)}
               onEdit={() => handleEdit(i)}
+              onAnalyze={() => handleAnalyze(i)}
               onDragStart={() => handleDragStart(i)}
               onDragEnd={handleDragEnd}
             />
@@ -226,6 +267,17 @@ export default function GridEditor({ imageManager, onImagesChange, compact = fal
           image={editingImage}
           onSave={handleSaveEdit}
           onClose={() => setEditingImage(null)}
+        />
+      )}
+
+      {/* 图片分析面板 */}
+      {analyzingImage && (
+        <ImageAnalysisPanel
+          imageData={analyzingImage.fullSize}
+          imageWidth={analyzingImage.width}
+          imageHeight={analyzingImage.height}
+          onClose={() => setAnalyzingImage(null)}
+          onApplyCrop={handleApplyAnalysisCrop}
         />
       )}
     </>

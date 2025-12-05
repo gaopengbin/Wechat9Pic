@@ -108,14 +108,55 @@ export function checkBrowserSupport(): {
 }
 
 /**
- * Convert File to Base64 string
+ * Check if file is HEIC/HEIF format
  */
-export function fileToBase64(file: File): Promise<string> {
+export function isHeicFile(file: File): boolean {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  return (
+    type === 'image/heic' ||
+    type === 'image/heif' ||
+    name.endsWith('.heic') ||
+    name.endsWith('.heif')
+  );
+}
+
+/**
+ * Convert HEIC file to JPEG blob
+ */
+export async function convertHeicToJpeg(file: File): Promise<Blob> {
+  const heic2any = (await import('heic2any')).default;
+  const result = await heic2any({
+    blob: file,
+    toType: 'image/jpeg',
+    quality: 0.92,
+  });
+  // heic2any may return array for multi-frame HEIC
+  return Array.isArray(result) ? result[0] : result;
+}
+
+/**
+ * Process file for upload - converts HEIC to JPEG if needed
+ */
+export async function processFileForUpload(file: File): Promise<File> {
+  if (isHeicFile(file)) {
+    const jpegBlob = await convertHeicToJpeg(file);
+    const newName = file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+    return new File([jpegBlob], newName, { type: 'image/jpeg' });
+  }
+  return file;
+}
+
+/**
+ * Convert File to Base64 string (with HEIC support)
+ */
+export async function fileToBase64(file: File): Promise<string> {
+  const processedFile = await processFileForUpload(file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(processedFile);
   });
 }
 

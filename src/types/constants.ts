@@ -8,8 +8,8 @@ export const MAX_IMAGE_DIMENSION = 2048; // 2048x2048
 export const MAX_IMAGES = 9;
 
 // Supported file formats
-export const SUPPORTED_IMAGE_FORMATS = ['image/jpeg', 'image/png', 'image/webp'];
-export const SUPPORTED_FILE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+export const SUPPORTED_IMAGE_FORMATS = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+export const SUPPORTED_FILE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
 
 // Grid positions (0-8 for 3x3 grid)
 export const GRID_POSITIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;

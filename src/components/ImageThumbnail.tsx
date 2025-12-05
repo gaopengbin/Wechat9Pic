@@ -9,6 +9,7 @@ interface ImageThumbnailProps {
   image: ImageData;
   onDelete: () => void;
   onEdit?: () => void;
+  onAnalyze?: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
 }
@@ -17,6 +18,7 @@ export default function ImageThumbnail({
   image,
   onDelete,
   onEdit,
+  onAnalyze,
   onDragStart,
   onDragEnd,
 }: ImageThumbnailProps) {
@@ -37,6 +39,38 @@ export default function ImageThumbnail({
       {/* 悬停遮罩 */}
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-300 rounded-xl backdrop-blur-[2px]" />
 
+      {/* 检测按钮 */}
+      {onAnalyze && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onAnalyze();
+          }}
+          className="
+            absolute top-2 left-2
+            w-8 h-8 rounded-full
+            bg-blue-500/80 text-white
+            opacity-0 group-hover:opacity-100
+            transition-all duration-300
+            flex items-center justify-center
+            hover:bg-blue-600 hover:scale-110
+            backdrop-blur-sm
+            shadow-lg
+          "
+          aria-label="检测图片"
+          title="检测人脸"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+        </button>
+      )}
+
       {/* 编辑按钮 */}
       {onEdit && (
         <button
@@ -56,6 +90,7 @@ export default function ImageThumbnail({
             shadow-lg
           "
           aria-label="编辑图片"
+          title="编辑图片"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
